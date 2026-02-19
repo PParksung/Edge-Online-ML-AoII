@@ -57,8 +57,8 @@ float W2[16][2] = {
 float B2[2] = {0.004370f, 0.191009f};
 
 float lr = 0.05f;           
-float beta_temp = 0.5f;  
-float beta_hum  = 3.0f;  
+float beta_temp = 0.5f;
+float beta_hum  = 3.0f;
 const float epsilon = 0.001f;  // float 비교 오차 방지 (0.5 "이상" = >= 0.499)
 
 float hidden_layer[N_HID];
@@ -133,7 +133,7 @@ void waitForTimeSync() {
       if (p_size) {
         String income = "";
         while (LoRa.available()) income += (char)LoRa.read();
-        
+
         if (income.length() > 8) {
            last_sync_unix = income.toInt();
            sync_millis = millis();
@@ -186,17 +186,17 @@ void loop() {
   float time_n = get_time_n();
 
   forward(cur_t, cur_h, time_n);
-  
-  float pred_t = (pred_scaled[0] * y_std[0]) + y_mean[0]; 
-  float pred_h = (pred_scaled[1] * y_std[1]) + y_mean[1]; 
+
+  float pred_t = (pred_scaled[0] * y_std[0]) + y_mean[0];
+  float pred_h = (pred_scaled[1] * y_std[1]) + y_mean[1];
 
   // float 절댓값은 fabsf() 사용 (abs()는 정수용이라 소수 잘림)
   float err_t = fabsf(cur_t - pred_t);
   float err_h = fabsf(cur_h - pred_h);
-  
+
   // 하트비트 체크: 10분이 지났는가?
   bool is_heartbeat = (millis() - last_send_millis >= HEARTBEAT_INTERVAL);
-  
+
   // 전송 조건: 오차가 임계값 이상이거나, 10분 하트비트, 또는 시간 미동기화. "이상" = >= (epsilon 반영)
   bool send_data = (err_t >= beta_temp - epsilon) || (err_h >= beta_hum - epsilon) || (last_sync_unix == 0) || is_heartbeat;
 
@@ -210,7 +210,7 @@ void loop() {
     }
     
     last_send_millis = millis();
-    
+
     LoRa.beginPacket();
     LoRa.print(String(cur_t) + "," + String(cur_h));
     LoRa.endPacket();
@@ -243,10 +243,10 @@ void loop() {
   Serial.println(String(cur_t) + "," + String(cur_h) + "," + String(pred_t) + "," + String(pred_h) + "," + String(err_t, 3) + "," + String(err_h, 3) + "," + status);
 
   // 전력 절감: 디스플레이/LoRa 슬립 후 5분 경과 시 깨어남
-  display.displayOff(); 
+  display.displayOff();
   LoRa.sleep();
 
-  uint64_t sleep_time_us = 300ULL * 1000ULL * 1000ULL; 
+  uint64_t sleep_time_us = 300ULL * 1000ULL * 1000ULL;
   esp_sleep_enable_timer_wakeup(sleep_time_us);
   esp_light_sleep_start();
 
