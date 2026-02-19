@@ -3,6 +3,7 @@
 #include "SSD1306Wire.h"
 #include <LoRa.h>
 #include <math.h>
+#include "esp_sleep.h"
 
 // ==========================================
 // 하드웨어 설정 (Heltec V2 / Las Vegas)
@@ -13,7 +14,7 @@
 #define SS      18
 #define RST     14
 #define DI0     26
-#define BAND    433E6  // 미국 라스베이거스 주파수 (433MHz -> 915MHz 확인 필요!)
+#define BAND    433E6
 
 #define OLED_SDA 4
 #define OLED_SCL 15
@@ -29,7 +30,7 @@ Adafruit_AHTX0 aht;
 #define N_HID 16 
 #define N_OUT 2
 
-// Scalers & Weights (성근님의 16-node 파라미터)
+// Scalers & Weights
 float x_mean[3] = {11.951440f, 34.796511f, 0.518765f};
 float x_std[3]  = {5.192832f, 19.254291f, 0.287677f};
 float y_mean[2] = {11.952372f, 34.792687f};
@@ -56,13 +57,19 @@ float W2[16][2] = {
 float B2[2] = {0.004370f, 0.191009f};
 
 float lr = 0.05f;           
-float beta_threshold = 0.5f; 
+float beta_temp = 0.5f;  
+float beta_hum  = 3.0f;  
+const float epsilon = 0.001f;  // float 비교 오차 방지 (0.5 "이상" = >= 0.499)
 
 float hidden_layer[N_HID];
 float pred_scaled[N_OUT];
 
 unsigned long last_sync_unix = 0;
 unsigned long sync_millis = 0;
+
+// [하트비트용 변수 추가]
+unsigned long last_send_millis = 0;
+const unsigned long HEARTBEAT_INTERVAL = 600000; // 10분 (밀리초)
 
 float sigmoid(float x) { return 1.0f / (1.0f + exp(-constrain(x, -20.0f, 20.0f))); }
 float d_sigmoid(float x) { return x * (1.0f - x); } 
@@ -108,7 +115,6 @@ float get_time_n() {
   return (float)local_sec / 86400.0f;
 }
 
-// *** [추가된 함수] setup에서 시간 동기화 시도 ***
 void waitForTimeSync() {
   display.clear();
   display.drawString(0, 0, "Syncing Time...");
@@ -116,12 +122,10 @@ void waitForTimeSync() {
 
   int retries = 0;
   while (last_sync_unix == 0) {
-    // 1. 게이트웨이에 'Ping' 데이터 전송 (0,0 보내면 Gateway가 시간 회신함)
     LoRa.beginPacket();
     LoRa.print("0.0,0.0"); 
     LoRa.endPacket();
 
-    // 2. 응답 대기 (3초)
     long start = millis();
     bool received = false;
     while (millis() - start < 3000) {
@@ -130,7 +134,6 @@ void waitForTimeSync() {
         String income = "";
         while (LoRa.available()) income += (char)LoRa.read();
         
-        // 숫자인지 확인 (타임스탬프)
         if (income.length() > 8) {
            last_sync_unix = income.toInt();
            sync_millis = millis();
@@ -171,8 +174,8 @@ void setup() {
   display.display();
   delay(1000);
 
-  // *** 여기서 시간 동기화 호출 ***
   waitForTimeSync();
+  last_send_millis = millis(); // 첫 동기화 시점부터 하트비트 타이머 시작
 }
 
 void loop() {
@@ -182,32 +185,43 @@ void loop() {
   float cur_h = h_event.relative_humidity;
   float time_n = get_time_n();
 
-  // 1. 추론
   forward(cur_t, cur_h, time_n);
-  float pred_t = (pred_scaled[0] * y_std[0]) + y_mean[0];
+  
+  float pred_t = (pred_scaled[0] * y_std[0]) + y_mean[0]; 
+  float pred_h = (pred_scaled[1] * y_std[1]) + y_mean[1]; 
 
-  // 2. 결정
-  float error = abs(cur_t - pred_t);
-  bool send_data = (error > beta_threshold) || (last_sync_unix == 0);
+  // float 절댓값은 fabsf() 사용 (abs()는 정수용이라 소수 잘림)
+  float err_t = fabsf(cur_t - pred_t);
+  float err_h = fabsf(cur_h - pred_h);
+  
+  // 하트비트 체크: 10분이 지났는가?
+  bool is_heartbeat = (millis() - last_send_millis >= HEARTBEAT_INTERVAL);
+  
+  // 전송 조건: 오차가 임계값 이상이거나, 10분 하트비트, 또는 시간 미동기화. "이상" = >= (epsilon 반영)
+  bool send_data = (err_t >= beta_temp - epsilon) || (err_h >= beta_hum - epsilon) || (last_sync_unix == 0) || is_heartbeat;
 
   String status = "SKIP";
 
   if (send_data) {
-    status = "SEND & TRAIN";
+    if (is_heartbeat && err_t <= beta_temp && err_h <= beta_hum) {
+      status = "HEARTBEAT"; // 오차는 정상인데 10분 돼서 보내는 경우
+    } else {
+      status = "SEND & TRAIN"; // 오차가 발생해서 보내는 경우
+    }
     
-    // LoRa 송신
+    last_send_millis = millis();
+    
     LoRa.beginPacket();
     LoRa.print(String(cur_t) + "," + String(cur_h));
     LoRa.endPacket();
 
-    // ACK 및 재동기화 (루프 내에서도 시간 보정)
     long start = millis();
     while (millis() - start < 1000) {
       int p_size = LoRa.parsePacket();
       if (p_size) {
         String income = "";
         while (LoRa.available()) income += (char)LoRa.read();
-        if (income.length() > 5) { // 유효한 타임스탬프인지 확인
+        if (income.length() > 5) {
            last_sync_unix = income.toInt();
            sync_millis = millis();
         }
@@ -218,12 +232,23 @@ void loop() {
     update_model(cur_t, cur_h, time_n);
   }
 
-  // 디스플레이
   display.clear();
-  display.drawString(0, 0, "Nodes: 16 / Err: " + String(error, 2));
-  display.drawString(0, 20, "Pred: " + String(pred_t, 1) + " / Real: " + String(cur_t, 1));
-  display.drawString(0, 40, ">> " + status);
+  display.drawString(0, 0, "Err T:" + String(err_t, 3) + " H:" + String(err_h, 3));
+  display.drawString(0, 15, "P_T:" + String(pred_t, 1) + " P_H:" + String(pred_h, 1));
+  display.drawString(0, 30, "R_T:" + String(cur_t, 1) + " R_H:" + String(cur_h, 1));
+  display.drawString(0, 45, ">> " + status);
   display.display();
 
-  delay(60000); // 1분 주기
+  // USB 시리얼 로그: edge_serial_logger.py로 SKIP/HEARTBEAT/SEND 전부 저장 (cur_t, cur_h, pred_t, pred_h, err_t, err_h, status)
+  Serial.println(String(cur_t) + "," + String(cur_h) + "," + String(pred_t) + "," + String(pred_h) + "," + String(err_t, 3) + "," + String(err_h, 3) + "," + status);
+
+  // 전력 절감: 디스플레이/LoRa 슬립 후 5분 경과 시 깨어남
+  display.displayOff(); 
+  LoRa.sleep();
+
+  uint64_t sleep_time_us = 300ULL * 1000ULL * 1000ULL; 
+  esp_sleep_enable_timer_wakeup(sleep_time_us);
+  esp_light_sleep_start();
+
+  display.displayOn();
 }

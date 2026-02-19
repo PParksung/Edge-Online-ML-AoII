@@ -1,7 +1,28 @@
+import os
+import sys
 import serial
 import time
 from datetime import datetime, timezone, timedelta
 from gateway_MLP_Logic import GatewayMLP
+
+# 프로젝트 루트를 path에 추가 (server.db import용)
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _project_root)
+
+# MySQL 설정: .env 또는 server/mysql_example.env 에서 MYSQL_* 환경 변수 로드 (IDE에서 실행해도 비밀번호 적용)
+for _env_file in (os.path.join(_project_root, ".env"), os.path.join(_project_root, "server", "mysql_example.env")):
+    if os.path.isfile(_env_file):
+        with open(_env_file, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k, _v = _k.strip(), _v.strip()
+                    if _k.startswith("MYSQL_"):
+                        os.environ[_k] = _v
+        break
+
+from server.db import init_db, insert_reading
 
 # =========================================================
 # 1. 3-16-2 모델 파라미터 (성근님의 최신 값 유지)
@@ -38,13 +59,20 @@ model = GatewayMLP(W1, B1, W2, B2, X_MEAN, X_STD, Y_MEAN, Y_STD)
 
 # 시리얼 설정 (포트 확인 필수)
 try:
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial('/dev/tty.usbserial-3', 115200, timeout=1)
     ser.flush()
 except:
     print("Error: Serial Port not found. Check connections.")
     exit()
 
 print("=== Gateway (Las Vegas Time / 3-16-2 Model) Started ===")
+
+# MySQL 테이블 생성 (readings)
+try:
+    init_db()
+    print("DB (MySQL) init OK.")
+except Exception as e:
+    print(f"DB init warning: {e} (계속 실행)")
 
 # 라스베이거스 시간대 설정 (UTC-8)
 LV_TIMEZONE = timezone(timedelta(hours=-8))
@@ -92,6 +120,12 @@ try:
                     print(f"\n[{now_lv.strftime('%H:%M:%S')}] Data RX")
                     print(f"   Actual: {actual_t:.2f}C / {actual_h:.2f}%")
                     print(f"   MyEst : {pred[0]:.2f}C / {pred[1]:.2f}%")
+                    
+                    # MySQL 저장 (모니터링/AoII 분석용)
+                    try:
+                        insert_reading(actual_t, actual_h, pred[0], pred[1])
+                    except Exception as e:
+                        print(f"   DB save error: {e}")
                     
                     # 온라인 학습 (가중치 동기화)
                     model.online_update(actual_t, actual_h, lr=0.05)
