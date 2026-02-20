@@ -1,5 +1,6 @@
 # Prometheus 설정 예시.
-# 사용: prometheus --config.file=monitoring/prometheus.yml
+# 사용: prometheus --config.file=monitoring/prometheus.yml --storage.tsdb.path=/tmp/prometheus_aoii
+# (--storage.tsdb.path 생략 시 프로젝트 루트에 data/ 폴더 생성됨. MONITORING.md 참고)
 # 이 설정은 AoII Flask 앱(port 5001)의 /metrics 를 15초마다 스크래핑합니다.
 
 global:
