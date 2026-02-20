@@ -120,7 +120,7 @@ python Pre_train.py
 
 - Arduino IDE에서 `edge_node/` 내 해당 `.ino` 열기.
 - 보드·라이브러리(Adafruit_AHTX0, LoRa, SSD1306 등) 설정 후 업로드.
-- **MLP 엣지**: 시리얼로 예측·실제값·이벟트(RX/EST) 전송; 게이트웨이와 시리얼로 연결.
+- **MLP 엣지**: 시리얼로 예측·실제값·이벤트(RX/EST) 전송; 게이트웨이와 시리얼로 연결.
 
 ### 3. 게이트웨이 (시리얼 → MQTT)
 
