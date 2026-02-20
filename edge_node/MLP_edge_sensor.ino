@@ -56,7 +56,7 @@ float W2[16][2] = {
 
 float B2[2] = {0.004370f, 0.191009f};
 
-float lr = 0.05f;           
+float lr = 0.01f;           
 float beta_temp = 0.5f;
 float beta_hum  = 3.0f;
 const float epsilon = 0.001f;  // float 비교 오차 방지 (0.5 "이상" = >= 0.499)
@@ -242,7 +242,7 @@ void loop() {
   // USB 시리얼 로그: edge_serial_logger.py로 SKIP/HEARTBEAT/SEND 전부 저장 (cur_t, cur_h, pred_t, pred_h, err_t, err_h, status)
   Serial.println(String(cur_t) + "," + String(cur_h) + "," + String(pred_t) + "," + String(pred_h) + "," + String(err_t, 3) + "," + String(err_h, 3) + "," + status);
 
-  // 전력 절감: 디스플레이/LoRa 슬립 후 5분 경과 시 깨어남
+  // 전력 절감: 디스플레이/LoRa 슬립 후 1분 경과 시 깨어남
   // display.displayOff();
   LoRa.sleep();
 
