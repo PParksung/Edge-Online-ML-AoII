@@ -2,6 +2,7 @@
 #include <Adafruit_AHTX0.h>
 #include "SSD1306Wire.h"
 #include <math.h>
+#include <Esp.h>
 
 // ==========================================
 // 하드웨어 설정 
@@ -54,11 +55,12 @@ void loop() {
   float cur_t = t_event.temperature;
   float cur_h = h_event.relative_humidity;
 
-  // 1. 단순 오차 계산
+  // 1. 연산 시간 측정 (오차 계산 + 전송 조건 판단)
+  unsigned long t_start = micros();
+
   float err_t = fabs(cur_t - last_sent_t);
   float err_h = fabs(cur_h - last_sent_h);
-  
-  // 2. 전송(로깅) 조건 판단
+
   bool is_heartbeat = (millis() - last_send_millis >= HEARTBEAT_INTERVAL);
   bool send_data = (err_t > beta_temp) || (err_h > beta_hum) || is_heartbeat;
 
@@ -70,16 +72,28 @@ void loop() {
     } else {
       status = "SEND (DELTA)";
     }
-    
-    // OLED 표시 및 가상 전송을 위해 상태 갱신
+
     last_sent_t = cur_t;
     last_sent_h = cur_h;
     last_send_millis = millis();
   }
 
-  // 3. 파이썬 로거에게 매분 무조건 센서값 전달
-  // (파이썬 스크립트가 알아서 로깅 여부를 판단하게 됨)
-  Serial.println(String(cur_t, 2) + "," + String(cur_h, 2));
+  unsigned long t_end = micros();
+  unsigned long inference_time_us = t_end - t_start;
+
+  // 2. 힙 메모리 (bytes)
+  uint32_t free_heap = ESP.getFreeHeap();
+  uint32_t total_heap = ESP.getHeapSize();
+
+  // 3. CSV 한 줄: actual_t, actual_h, pred_t, pred_h, error_t, error_h, status, inference_time_us, free_heap, total_heap
+  //    (Threshold 정책: pred = last_sent)
+  Serial.println(
+    String(cur_t, 2) + "," + String(cur_h, 2) + "," +
+    String(last_sent_t, 2) + "," + String(last_sent_h, 2) + "," +
+    String(err_t, 3) + "," + String(err_h, 3) + "," +
+    status + "," +
+    String(inference_time_us) + "," + String(free_heap) + "," + String(total_heap)
+  );
 
   // 4. OLED 디스플레이 출력 (현장 모니터링용)
   display.clear();
@@ -89,6 +103,5 @@ void loop() {
   display.drawString(0, 45, ">> " + status);
   display.display();
 
-  // 5. 1분 대기
-  delay(60000); 
+  delay(60000);
 }

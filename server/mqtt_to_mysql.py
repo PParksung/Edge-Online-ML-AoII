@@ -46,8 +46,12 @@ def on_message(client, userdata, msg):
         actual_h = float(data["actual_h"])
         pred_t = float(data["pred_t"])
         pred_h = float(data["pred_h"])
-        insert_reading(actual_t, actual_h, pred_t, pred_h)
-        print(f"mqtt_to_mysql: saved 1 reading (T={actual_t:.2f}, H={actual_h:.2f})")
+        transmission_delay_ms = data.get("transmission_delay_ms")
+        if transmission_delay_ms is not None:
+            transmission_delay_ms = int(transmission_delay_ms)
+        insert_reading(actual_t, actual_h, pred_t, pred_h, transmission_delay_ms=transmission_delay_ms)
+        delay_str = f", delay={transmission_delay_ms}ms" if transmission_delay_ms is not None else ""
+        print(f"mqtt_to_mysql: saved 1 reading (T={actual_t:.2f}, H={actual_h:.2f}{delay_str})")
     except Exception as e:
         print(f"mqtt_to_mysql: on_message error: {e}")
 

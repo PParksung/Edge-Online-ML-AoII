@@ -34,6 +34,40 @@ def get_connection():
         conn.close()
 
 
+def _add_readings_columns_if_missing(conn):
+    """기존 readings 테이블에 transmission_delay_ms 등 컬럼이 없으면 추가."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'readings'"
+        )
+        existing = {row["COLUMN_NAME"] for row in cur.fetchall()}
+    if "transmission_delay_ms" not in existing:
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE readings ADD COLUMN transmission_delay_ms INT NULL")
+        conn.commit()
+
+
+def _add_edge_log_columns_if_missing(conn):
+    """기존 DB에 성능 컬럼이 없으면 추가 (마이그레이션)."""
+    columns_to_add = [
+        ("error_humidity", "DOUBLE NULL"),
+        ("status", "VARCHAR(32) NULL"),
+        ("inference_time_us", "BIGINT UNSIGNED NULL"),
+        ("free_heap", "INT UNSIGNED NULL"),
+        ("total_heap", "INT UNSIGNED NULL"),
+    ]
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'edge_log'"
+        )
+        existing = {row["COLUMN_NAME"] for row in cur.fetchall()}
+    for col_name, col_def in columns_to_add:
+        if col_name not in existing:
+            with conn.cursor() as cur:
+                cur.execute(f"ALTER TABLE edge_log ADD COLUMN {col_name} {col_def}")
+            conn.commit()
+
+
 def init_db():
     """테이블 생성 (최초 1회)."""
     with get_connection() as conn:
@@ -48,9 +82,11 @@ def init_db():
                     pred_humidity DOUBLE NOT NULL,
                     error_temp DOUBLE NOT NULL,
                     error_humidity DOUBLE NOT NULL,
+                    transmission_delay_ms INT NULL,
                     INDEX idx_created_at (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            _add_readings_columns_if_missing(conn)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS edge_log (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -60,38 +96,71 @@ def init_db():
                     pred_temp DOUBLE NOT NULL,
                     pred_humidity DOUBLE NOT NULL,
                     error_temp DOUBLE NOT NULL,
+                    error_humidity DOUBLE NULL,
                     triggered TINYINT NOT NULL COMMENT '1=SEND, 0=SKIP',
+                    status VARCHAR(32) NULL,
+                    inference_time_us BIGINT UNSIGNED NULL,
+                    free_heap INT UNSIGNED NULL,
+                    total_heap INT UNSIGNED NULL,
                     INDEX idx_created_at (created_at),
-                    INDEX idx_triggered (triggered)
+                    INDEX idx_triggered (triggered),
+                    INDEX idx_status (status)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            _add_edge_log_columns_if_missing(conn)
 
 
-def insert_edge_log(actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, triggered):
-    """엣지 시리얼 로그용: SEND/SKIP 전부 저장. triggered: 1=SEND, 0=SKIP. created_at은 로컬 시간."""
-    created_at = datetime.now()  # 로컬 시간
+def insert_edge_log(
+    actual_temp,
+    actual_humidity,
+    pred_temp,
+    pred_humidity,
+    error_temp,
+    triggered,
+    error_humidity=None,
+    status=None,
+    inference_time_us=None,
+    free_heap=None,
+    total_heap=None,
+):
+    """엣지 시리얼 로그용: SEND/SKIP 전부 저장. triggered: 1=SEND, 0=SKIP. 성능 지표(μs, heap) 선택."""
+    created_at = datetime.now()
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO edge_log
-                   (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, triggered)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, 1 if triggered else 0),
+                   (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity,
+                    error_temp, error_humidity, triggered, status, inference_time_us, free_heap, total_heap)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    created_at,
+                    actual_temp,
+                    actual_humidity,
+                    pred_temp,
+                    pred_humidity,
+                    error_temp,
+                    error_humidity if error_humidity is not None else 0.0,
+                    1 if triggered else 0,
+                    status,
+                    inference_time_us,
+                    free_heap,
+                    total_heap,
+                ),
             )
 
 
-def insert_reading(actual_temp, actual_humidity, pred_temp, pred_humidity):
-    """수신된 한 건 + 그 시점 게이트웨이 예측값 저장. created_at은 로컬 시간(CSV/모니터링과 맞춤)."""
-    created_at = datetime.now()  # 로컬 시간 (UTC 아님)
+def insert_reading(actual_temp, actual_humidity, pred_temp, pred_humidity, transmission_delay_ms=None):
+    """수신된 한 건 + 그 시점 게이트웨이 예측값 저장. transmission_delay_ms: 엣지→게이트웨이 전송 지연(ms)."""
+    created_at = datetime.now()
     error_temp = actual_temp - pred_temp
     error_humidity = actual_humidity - pred_humidity
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO readings
-                   (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, error_humidity)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, error_humidity),
+                   (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, error_humidity, transmission_delay_ms)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (created_at, actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, error_humidity, transmission_delay_ms),
             )
 
 
