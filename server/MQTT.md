@@ -1,112 +1,93 @@
-# MQTT 적용 요약: 변경 사항 및 실행 순서
+# MQTT 설정 및 실행
 
-## 0. 라즈베리파이에서 할 명령어 (요약)
+## 개요
 
-**라즈베리파이 SSH 접속 후** 아래만 순서대로 실행하면 됩니다.  
-`/home/pi/Edge-Online-ML-AoII` 대신 실제 프로젝트 경로로 바꿔서 쓰세요.
+- Gateway는 수신 데이터를 **MQTT로만 발행**하고, DB/CSV 저장은 **구독자**가 담당한다.
+- **브로커**: 라즈베리파이에 Mosquitto 실행. 별도 등록 없이 토픽 `aoii/readings` 사용.
+- **설정**: 프로젝트 루트 `.env` 한 파일만 사용 (git 제외, 팀원에게 내용 공유).
 
-```bash
-# 1) Mosquitto 설치 (최초 1회)
-sudo apt update
-sudo apt install -y mosquitto mosquitto-clients
-sudo systemctl enable mosquitto
+---
 
-# 2) Python 패키지 (paho-mqtt 등, 최초 1회)
-cd /home/pi/Edge-Online-ML-AoII
-pip install -r requirements.txt
+## 토픽·페이로드
 
-# 3) 브로커 켜기
-sudo systemctl start mosquitto
+| 항목 | 내용 |
+|------|------|
+| 토픽 | `aoii/readings` |
+| 페이로드 | JSON. `event`(RX/EST), `timestamp`, `time_n`, `actual_t`, `actual_h`, `pred_t`, `pred_h`, `error_t`, `error_h`, `total_tx` |
 
-# 4) 구독자 2개 백그라운드 실행 (DB 저장, CSV 저장)
-cd /home/pi/Edge-Online-ML-AoII
-python3 server/mqtt_to_mysql.py &
-python3 server/mqtt_to_csv.py &
+---
 
-# 5) 게이트웨이 실행 (시리얼 → MQTT). USB 시리얼 연결된 상태에서
-python3 gateway/gateway.py
+## 역할 정리
+
+| 구성요소 | 실행 위치 | 역할 |
+|----------|-----------|------|
+| **gateway/gateway.py** | ESP32 USB가 연결된 쪽 (맥북 또는 Pi) | 시리얼 수신 → MQTT publish |
+| **server/mqtt_to_csv.py** | 라즈베리파이 | 구독 → `experiment_log_online.csv` 저장 |
+| **server/mqtt_to_mysql.py** | 맥북 | 구독 → MySQL `readings` 저장 |
+| **Mosquitto** | 라즈베리파이 | MQTT 브로커 (port 1883) |
+
+---
+
+## .env에 넣을 키 (팀원 공유용)
+
+```
+# MySQL (맥북 로컬 DB)
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=비밀번호
+MYSQL_DATABASE=aoii
+
+# MQTT (맥북에서 실행할 때 브로커 = 라즈베리파이 IP)
+MQTT_BROKER=192.168.x.x
+MQTT_PORT=1883
+
+# 시리얼 (맥: /dev/cu.usbserial-3, Pi: /dev/ttyUSB0)
+SERIAL_PORT=/dev/cu.usbserial-3
 ```
 
-이후 엣지에서 데이터가 오면 gateway가 MQTT로 보내고, 구독자들이 DB/CSV에 저장합니다.
-
 ---
 
-## 1. 바꾼 코드 요약
+## 실행 순서
 
-| 대상 | 변경 내용 |
-|------|-----------|
-| **gateway/gateway.py** | DB(`insert_reading`)·CSV 직접 쓰기 제거 → 수신/EST 발생 시 **MQTT로 한 번만** `aoii/readings`에 JSON publish |
-| **server/mqtt_to_mysql.py** (신규) | `aoii/readings` 구독 → `event == "RX"`일 때만 `db.insert_reading()` 호출 |
-| **server/mqtt_to_csv.py** (신규) | `aoii/readings` 구독 → RX/EST 모두 `experiment_log_online.csv`에 한 줄씩 append |
-| **requirements.txt** | `paho-mqtt` 추가 |
-
-Gateway는 이제 **MQTT 브로커에만 메시지를 보내고**, DB·CSV 기록은 각 구독자 스크립트가 담당합니다.
-
----
-
-## 2. MQTT “등록”이란?
-
-**별도 등록 절차 없습니다.**  
-MQTT는 브로커(예: Mosquitto)만 떠 있으면, 클라이언트가 **같은 브로커 주소**로 접속해 publish/ subscribe 하면 됩니다.  
-토픽 `aoii/readings`도 사전 등록 없이, 처음 메시지를 보내는 순간 사용됩니다.
-
----
-
-## 3. 라즈베리파이랑 “먼저 연결”해야 하나?
-
-- **실제 데이터 흐름**:  
-  - **엣지(ESP32)** → LoRa → **게이트웨이(ESP32)** → USB 시리얼 → **라즈베리파이**  
-  - 라즈베리파이에서 `gateway.py`가 돌아가므로, **gateway와 MQTT 브로커는 같은 기기(라즈베리파이)에서 동작**하는 구성을 권장합니다.
-- **권장 순서**  
-  1. **라즈베리파이에 SSH 접속** (코드 배포·실행용).  
-  2. **라즈베리파이에 MQTT 브로커(Mosquitto) 설치·실행.**  
-  3. **같은 라즈베리파이에서** 구독자 2개 실행 → 그 다음 gateway 실행.  
-  즉, “라즈베리파이랑 먼저 연결(SSH)”한 뒤, 그 위에서 브로커 → 구독자 → gateway 순으로 켜면 됩니다.
-
----
-
-## 4. 실행 순서 (라즈베리파이 기준)
-
-1. **브로커 기동**  
-   ```bash
-   sudo systemctl start mosquitto
-   # 또는: mosquitto -v
-   ```
-2. **구독자 실행** (DB 저장, CSV 저장)  
-   ```bash
-   cd /path/to/Edge-Online-ML-AoII
-   python server/mqtt_to_mysql.py &   # 백그라운드
-   python server/mqtt_to_csv.py &    # 백그라운드
-   ```
-3. **게이트웨이 실행** (시리얼 수신 → MQTT publish)  
-   ```bash
-   python gateway/gateway.py
-   ```
-
-PC에서 구독자만 실행하려면, PC와 라즈베리파이가 같은 네트워크에 있어야 하고, `MQTT_BROKER`를 라즈베리파이 IP로 설정한 뒤 위 2번만 PC에서 실행하면 됩니다.
-
----
-
-## 5. Mosquitto 설치 (라즈베리파이)
+### 라즈베리파이
 
 ```bash
-sudo apt update
-sudo apt install -y mosquitto mosquitto-clients
+# Mosquitto 설치 (최초 1회)
+sudo apt update && sudo apt install -y mosquitto mosquitto-clients
 sudo systemctl enable mosquitto
+
+# 외부 접속 허용 (맥북 등에서 구독하려면)
+sudo nano /etc/mosquitto/mosquitto.conf
+# 맨 아래 추가: listener 1883 0.0.0.0  /  allow_anonymous true
+sudo systemctl restart mosquitto
+
+# 구독자 (CSV만; DB는 맥북에서 처리)
+cd ~/Edge-Online-ML-AoII
+source venv/bin/activate
+python server/mqtt_to_csv.py &
+```
+
+### 맥북
+
+```bash
+# 1) MySQL 실행, DB 생성 (aoii)
+# 2) .env 설정 후 gateway 실행 (ESP32 USB 연결)
+.venv/bin/python gateway/gateway.py
+
+# 3) 다른 터미널에서 DB 구독자
+.venv/bin/python server/mqtt_to_mysql.py
+```
+
+- **gateway**는 ESP32가 맥북 USB에 연결된 경우 맥북에서 실행. `.env`에 `MQTT_BROKER=라즈베리파이IP`, `SERIAL_PORT=/dev/cu.usbserial-3` 등 설정.
+- **mqtt_to_mysql**은 맥북에서 실행해 맥북 MySQL에 저장.
+
+---
+
+## Mosquitto만 Pi에서 켜기
+
+```bash
 sudo systemctl start mosquitto
 ```
 
-기본 포트 **1883** 사용.  
-필요 시 `.env` 또는 환경 변수로 `MQTT_BROKER=localhost`, `MQTT_PORT=1883` 지정 (기본값이므로 생략 가능).
-
----
-
-## 6. 토픽·페이로드
-
-- **토픽**: `aoii/readings`  
-- **페이로드**: JSON  
-  - `event`: `"RX"` (엣지 수신) 또는 `"EST"` (게이트웨이 추정)  
-  - `timestamp`, `time_n`, `actual_t`, `actual_h`, `pred_t`, `pred_h`, `error_t`, `error_h`, `total_tx`  
-  - EST일 때 `actual_t`/`actual_h`/`error_t`/`error_h`는 `null` 가능.
-
-이제 **코드에서 바꾼 것**, **MQTT 등록 없음**, **라즈베리파이 연결 후 브로커 → 구독자 → gateway 순서**만 지키면 됩니다.
+기본 포트 1883. `.env`에 `MQTT_BROKER`, `MQTT_PORT` 없으면 각 스크립트 기본값(localhost, 1883) 사용.

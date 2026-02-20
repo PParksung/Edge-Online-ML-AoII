@@ -1,7 +1,7 @@
 # server/db.py
 """MySQL: 엣지 수신 데이터 및 게이트웨이 예측 저장. AoII/모니터링용."""
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from contextlib import contextmanager
 
 try:
@@ -68,8 +68,8 @@ def init_db():
 
 
 def insert_edge_log(actual_temp, actual_humidity, pred_temp, pred_humidity, error_temp, triggered):
-    """엣지 시리얼 로그용: SEND/SKIP 전부 저장. triggered: 1=SEND, 0=SKIP."""
-    created_at = datetime.now(timezone.utc)
+    """엣지 시리얼 로그용: SEND/SKIP 전부 저장. triggered: 1=SEND, 0=SKIP. created_at은 로컬 시간."""
+    created_at = datetime.now()  # 로컬 시간
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -81,8 +81,8 @@ def insert_edge_log(actual_temp, actual_humidity, pred_temp, pred_humidity, erro
 
 
 def insert_reading(actual_temp, actual_humidity, pred_temp, pred_humidity):
-    """수신된 한 건 + 그 시점 게이트웨이 예측값 저장."""
-    created_at = datetime.now(timezone.utc)
+    """수신된 한 건 + 그 시점 게이트웨이 예측값 저장. created_at은 로컬 시간(CSV/모니터링과 맞춤)."""
+    created_at = datetime.now()  # 로컬 시간 (UTC 아님)
     error_temp = actual_temp - pred_temp
     error_humidity = actual_humidity - pred_humidity
     with get_connection() as conn:
