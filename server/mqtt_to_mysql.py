@@ -1,8 +1,9 @@
 # server/mqtt_to_mysql.py
-"""MQTT 구독: aoii/readings 수신 시 RX 이벤트만 MySQL readings 테이블에 저장."""
+"""MQTT 구독: aoii/readings 수신 시 RX 이벤트만 MySQL readings 테이블에 저장. insert 실패 시 지수 백오프 재시도."""
 import os
 import sys
 import json
+import time
 
 # 프로젝트 루트 추가 (db import 및 .env 로드)
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +29,28 @@ MQTT_BROKER = os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_TOPIC = "aoii/readings"
 
+# insert 재시도: 최대 횟수, 지수 백오프 초 단위
+INSERT_MAX_RETRIES = 5
+INSERT_BASE_DELAY = 1.0  # 1s, 2s, 4s, 8s, 16s
+
+
+def insert_reading_with_retry(actual_t, actual_h, pred_t, pred_h):
+    """MySQL insert 실패 시 지수 백오프 재시도. 전부 실패 시 로그 후 예외 전파."""
+    last_err = None
+    for attempt in range(INSERT_MAX_RETRIES):
+        try:
+            insert_reading(actual_t, actual_h, pred_t, pred_h)
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < INSERT_MAX_RETRIES - 1:
+                delay = INSERT_BASE_DELAY * (2 ** attempt)
+                print(f"mqtt_to_mysql: insert retry {attempt + 1}/{INSERT_MAX_RETRIES} in {delay:.1f}s: {e}")
+                time.sleep(delay)
+            else:
+                print(f"mqtt_to_mysql: insert FAILED after {INSERT_MAX_RETRIES} retries: {last_err}")
+                raise last_err
+
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -46,6 +69,8 @@ def on_message(client, userdata, msg):
         actual_h = float(data["actual_h"])
         pred_t = float(data["pred_t"])
         pred_h = float(data["pred_h"])
+        insert_reading_with_retry(actual_t, actual_h, pred_t, pred_h)
+        print(f"mqtt_to_mysql: saved 1 reading (T={actual_t:.2f}, H={actual_h:.2f})")
         transmission_delay_ms = data.get("transmission_delay_ms")
         if transmission_delay_ms is not None:
             transmission_delay_ms = int(transmission_delay_ms)
