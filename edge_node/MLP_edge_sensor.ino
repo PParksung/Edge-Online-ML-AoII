@@ -4,6 +4,7 @@
 #include <LoRa.h>
 #include <math.h>
 #include "esp_sleep.h"
+#include <Esp.h>
 
 // ==========================================
 // 하드웨어 설정 (Heltec V2 / Las Vegas)
@@ -185,34 +186,36 @@ void loop() {
   float cur_h = h_event.relative_humidity;
   float time_n = get_time_n();
 
+  // 연산 시간 측정: 추론(forward) + 판단 로직
+  unsigned long t_start = micros();
+
   forward(cur_t, cur_h, time_n);
 
   float pred_t = (pred_scaled[0] * y_std[0]) + y_mean[0];
   float pred_h = (pred_scaled[1] * y_std[1]) + y_mean[1];
 
-  // float 절댓값은 fabsf() 사용 (abs()는 정수용이라 소수 잘림)
   float err_t = fabsf(cur_t - pred_t);
   float err_h = fabsf(cur_h - pred_h);
 
-  // 하트비트 체크: 10분이 지났는가?
   bool is_heartbeat = (millis() - last_send_millis >= HEARTBEAT_INTERVAL);
-
-  // 전송 조건: 오차가 임계값 이상이거나, 10분 하트비트, 또는 시간 미동기화. "이상" = >= (epsilon 반영)
   bool send_data = (err_t >= beta_temp - epsilon) || (err_h >= beta_hum - epsilon) || (last_sync_unix == 0) || is_heartbeat;
 
   String status = "SKIP";
 
   if (send_data) {
     if (is_heartbeat && err_t <= beta_temp && err_h <= beta_hum) {
-      status = "HEARTBEAT"; // 오차는 정상인데 10분 돼서 보내는 경우
+      status = "HEARTBEAT";
     } else {
-      status = "SEND & TRAIN"; // 오차가 발생해서 보내는 경우
+      status = "SEND & TRAIN";
     }
-    
+
     last_send_millis = millis();
 
+    // 엣지 전송 시점 타임스탬프(epoch ms) → 게이트웨이에서 transmission_delay_ms 계산용
+    unsigned long edge_timestamp_ms = last_sync_unix * 1000UL + (millis() - sync_millis);
+
     LoRa.beginPacket();
-    LoRa.print(String(cur_t) + "," + String(cur_h));
+    LoRa.print(String(edge_timestamp_ms) + "," + String(cur_t) + "," + String(cur_h));
     LoRa.endPacket();
 
     long start = millis();
@@ -232,6 +235,12 @@ void loop() {
     update_model(cur_t, cur_h, time_n);
   }
 
+  unsigned long t_end = micros();
+  unsigned long inference_time_us = t_end - t_start;
+
+  uint32_t free_heap = ESP.getFreeHeap();
+  uint32_t total_heap = ESP.getHeapSize();
+
   display.clear();
   display.drawString(0, 0, "Err T:" + String(err_t, 3) + " H:" + String(err_h, 3));
   display.drawString(0, 15, "P_T:" + String(pred_t, 1) + " P_H:" + String(pred_h, 1));
@@ -239,8 +248,14 @@ void loop() {
   display.drawString(0, 45, ">> " + status);
   display.display();
 
-  // USB 시리얼 로그: edge_serial_logger.py로 SKIP/HEARTBEAT/SEND 전부 저장 (cur_t, cur_h, pred_t, pred_h, err_t, err_h, status)
-  Serial.println(String(cur_t) + "," + String(cur_h) + "," + String(pred_t) + "," + String(pred_h) + "," + String(err_t, 3) + "," + String(err_h, 3) + "," + status);
+  // CSV 한 줄: actual_t, actual_h, pred_t, pred_h, error_t, error_h, status, inference_time_us, free_heap, total_heap
+  Serial.println(
+    String(cur_t) + "," + String(cur_h) + "," +
+    String(pred_t) + "," + String(pred_h) + "," +
+    String(err_t, 3) + "," + String(err_h, 3) + "," +
+    status + "," +
+    String(inference_time_us) + "," + String(free_heap) + "," + String(total_heap)
+  );
 
   // 전력 절감: 디스플레이/LoRa 슬립 후 1분 경과 시 깨어남
   // display.displayOff();

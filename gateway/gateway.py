@@ -117,10 +117,20 @@ try:
             
             if "Received:" in line:
                 try:
+                    gateway_receive_ms = int(time.time() * 1000)  # 수신 즉시 시각 (epoch ms)
                     payload = line.split("Received: ")[1]
-                    parts = payload.split(",")
-                    actual_t = float(parts[0])
-                    actual_h = float(parts[1])
+                    parts = [p.strip() for p in payload.split(",")]
+
+                    # 페이로드 형식: 3필드 = edge_timestamp_ms,actual_t,actual_h / 2필드 = actual_t,actual_h (구 형식)
+                    if len(parts) >= 3:
+                        edge_timestamp_ms = int(parts[0])
+                        actual_t = float(parts[1])
+                        actual_h = float(parts[2])
+                        transmission_delay_ms = gateway_receive_ms - edge_timestamp_ms
+                    else:
+                        actual_t = float(parts[0])
+                        actual_h = float(parts[1])
+                        transmission_delay_ms = None
 
                     # (1) Ping (0.0, 0.0) 필터링
                     if actual_t == 0.0 and actual_h == 0.0:
@@ -135,9 +145,10 @@ try:
 
                     print(f"\n[{now_lv.strftime('%H:%M:%S')}] Data RX! (TX Count: {total_tx_count})")
                     print(f"   Actual: {actual_t:.2f}C / {actual_h:.2f}% | Pred: {pred[0]:.2f}C / {pred[1]:.2f}%")
+                    if transmission_delay_ms is not None:
+                        print(f"   Transmission delay: {transmission_delay_ms} ms")
 
-                    # MQTT로 한 번만 발행 (DB/CSV는 구독자 mqtt_to_mysql, mqtt_to_csv에서 처리)
-                    _mqtt_publish(mqtt_client, {
+                    payload_out = {
                         "event": "RX",
                         "timestamp": now_lv.strftime("%Y-%m-%d %H:%M:%S"),
                         "time_n": round(time_n, 4),
@@ -148,7 +159,11 @@ try:
                         "error_t": round(err_t, 2),
                         "error_h": round(err_h, 2),
                         "total_tx": total_tx_count,
-                    })
+                    }
+                    if transmission_delay_ms is not None:
+                        payload_out["transmission_delay_ms"] = transmission_delay_ms
+
+                    _mqtt_publish(mqtt_client, payload_out)
 
                     # (3) 모델 동기화 및 학습 (비교군 Offline TinyML 실험 시 아래 한 줄 주석 처리)
                     # 온라인 학습 (가중치 동기화)
