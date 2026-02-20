@@ -42,7 +42,7 @@ float W1[3][16] = {
   {-0.169951f, 0.177320f, 0.187231f, 0.182245f, -0.020823f, -0.040330f, 0.068759f, -0.062626f, -0.239455f, -0.115023f, 0.069360f, 0.001581f, -0.151701f, 0.057098f, 0.121142f, -0.038202f}
 };
 
-float B1[16] = {
+float bias1[16] = {
   -0.103147f, -0.179799f, 0.235186f, 0.303573f, 0.055328f, 0.258825f, 0.170623f, 0.350530f,
   -0.223219f, -0.245579f, 0.069463f, -0.026183f, -0.112913f, -0.009116f, -0.218366f, 0.355398f
 };
@@ -77,7 +77,7 @@ float d_sigmoid(float x) { return x * (1.0f - x); }
 void forward(float t, float h, float tn) {
   float in_s[3] = {(t - x_mean[0])/x_std[0], (h - x_mean[1])/x_std[1], (tn - x_mean[2])/x_std[2]};
   for(int j=0; j < N_HID; j++) {
-    float sum = B1[j];
+    float sum = bias1[j];
     for(int i=0; i < N_IN; i++) sum += in_s[i] * W1[i][j];
     hidden_layer[j] = sigmoid(sum);
   }
@@ -103,7 +103,7 @@ void update_model(float t, float h, float tn) {
     for(int i=0; i < N_OUT; i++) error_sum += out_err[i] * W2[j][i];
     float delta = error_sum * d_sigmoid(hidden_layer[j]);
     for(int i=0; i < N_IN; i++) W1[i][j] += lr * delta * in_s[i];
-    B1[j] += lr * delta;
+    bias1[j] += lr * delta;
   }
 }
 
@@ -243,10 +243,10 @@ void loop() {
   Serial.println(String(cur_t) + "," + String(cur_h) + "," + String(pred_t) + "," + String(pred_h) + "," + String(err_t, 3) + "," + String(err_h, 3) + "," + status);
 
   // 전력 절감: 디스플레이/LoRa 슬립 후 5분 경과 시 깨어남
-  display.displayOff();
+  // display.displayOff();
   LoRa.sleep();
 
-  uint64_t sleep_time_us = 300ULL * 1000ULL * 1000ULL;
+  uint64_t sleep_time_us = 60ULL * 1000ULL * 1000ULL;  // 1분
   esp_sleep_enable_timer_wakeup(sleep_time_us);
   esp_light_sleep_start();
 

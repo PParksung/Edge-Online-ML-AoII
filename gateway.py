@@ -11,20 +11,7 @@ import paho.mqtt.client as mqtt
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _project_root)
 
-# .env 로드 (맥북에서 실행 시 MQTT_BROKER=라즈베리파이IP 등)
-for _env_file in (os.path.join(_project_root, ".env"), os.path.join(_project_root, "server", "mysql_example.env")):
-    if os.path.isfile(_env_file):
-        with open(_env_file, "r", encoding="utf-8") as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith("#") and "=" in _line:
-                    _k, _v = _line.split("=", 1)
-                    _k, _v = _k.strip(), _v.strip()
-                    if _k.startswith("MQTT_") or _k.startswith("SERIAL_"):
-                        os.environ[_k] = _v
-        break
-
-# MQTT 설정 (라즈베리파이에서 broker 같은 기기면 localhost, 맥북에서 실행 시 Pi IP)
+# MQTT 설정 (라즈베리파이에서 broker 같은 기기면 localhost, PC에서 실행 시 Pi IP로 변경)
 MQTT_BROKER = os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_TOPIC_READINGS = "aoii/readings"
@@ -70,14 +57,13 @@ except Exception as e:
     print(f"MQTT connect warning: {e} (계속 실행, 나중에 publish 시도)")
 
 # =========================================================
-# 3. 시스템 초기화 (시리얼: 맥 /dev/tty.usbserial-3 또는 /dev/cu.usbserial-3, 라즈베리파이 /dev/ttyUSB0)
+# 3. 시스템 초기화
 # =========================================================
-SERIAL_PORT = os.environ.get("SERIAL_PORT", "/dev/tty.usbserial-3")
 try:
-    ser = serial.Serial(SERIAL_PORT, 115200, timeout=1)
+    ser = serial.Serial('/dev/tty.usbserial-3', 115200, timeout=1)
     ser.flush()
-except Exception as e:
-    print(f"Error: Serial Port not found (tried {SERIAL_PORT}). Check USB connection and .env SERIAL_PORT. {e}")
+except Exception:
+    print("Error: Serial Port not found. Check connections.")
     exit()
 
 print("=== Gateway (Las Vegas Time / 3-16-2 Model) Started ===")
@@ -151,7 +137,12 @@ try:
                         "total_tx": total_tx_count,
                     })
 
-                    # (3) 모델 동기화 및 학습 (비교군 Offline TinyML 실험 시 아래 한 줄 주석 처리)
+                    # (3) 모델 동기화 및 학습
+                    # *** 비교군(Offline TinyML) 실험 시에는 아래 한 줄을 주석 처리(#) 하세요! ***
+                    print(f"\n[{now_lv.strftime('%H:%M:%S')}] Data RX")
+                    print(f"   Actual: {actual_t:.2f}C / {actual_h:.2f}%")
+                    print(f"   MyEst : {pred[0]:.2f}C / {pred[1]:.2f}%")
+
                     # 온라인 학습 (가중치 동기화)
                     model.online_update(actual_t, actual_h, lr=0.05)
                     

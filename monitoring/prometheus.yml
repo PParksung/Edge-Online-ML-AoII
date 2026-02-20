@@ -1,0 +1,14 @@
+# Prometheus 설정 예시.
+# 사용: prometheus --config.file=monitoring/prometheus.yml
+# 이 설정은 AoII Flask 앱(port 5001)의 /metrics 를 15초마다 스크래핑합니다.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "aoii-gateway"
+    static_configs:
+      - targets: ["localhost:5001"]
+    metrics_path: /metrics
+    scrape_interval: 15s

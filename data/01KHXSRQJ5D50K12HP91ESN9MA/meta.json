@@ -1,0 +1,18 @@
+{
+	"ulid": "01KHXSRQJ5D50K12HP91ESN9MA",
+	"minTime": 1771589443182,
+	"maxTime": 1771596000000,
+	"stats": {
+		"numSamples": 15,
+		"numFloatSamples": 15,
+		"numSeries": 5,
+		"numChunks": 5
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01KHXSRQJ5D50K12HP91ESN9MA"
+		]
+	},
+	"version": 1
+}
