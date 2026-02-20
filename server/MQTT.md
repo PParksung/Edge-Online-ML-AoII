@@ -21,10 +21,12 @@
 
 | 구성요소 | 실행 위치 | 역할 |
 |----------|-----------|------|
-| **gateway/gateway.py** | ESP32 USB가 연결된 쪽 (맥북 또는 Pi) | 시리얼 수신 → MQTT publish |
+| **gateway/gateway.py** | **라즈베리파이** (수신용 LoRa ESP32가 Pi USB에 연결됨) | 시리얼 수신 → MQTT publish |
 | **server/mqtt_to_csv.py** | 라즈베리파이 | 구독 → `experiment_log_online.csv` 저장 |
 | **server/mqtt_to_mysql.py** | 맥북 | 구독 → MySQL `readings` 저장 |
 | **Mosquitto** | 라즈베리파이 | MQTT 브로커 (port 1883) |
+
+- **하드웨어**: 수신용 LoRa(게이트웨이 ESP32) → **라즈베리파이 USB**. 온습도(엣지 ESP32) → **맥북 USB만** (전원·시리얼 로그용).
 
 ---
 
@@ -42,8 +44,8 @@ MYSQL_DATABASE=aoii
 MQTT_BROKER=192.168.x.x
 MQTT_PORT=1883
 
-# 시리얼 (맥: /dev/cu.usbserial-3, Pi: /dev/ttyUSB0)
-SERIAL_PORT=/dev/cu.usbserial-3
+# 시리얼 (gateway.py는 Pi에서만 실행 → Pi: /dev/ttyUSB0)
+SERIAL_PORT=/dev/ttyUSB0
 ```
 
 ---
@@ -68,19 +70,27 @@ source venv/bin/activate
 python server/mqtt_to_csv.py &
 ```
 
+### 라즈베리파이 (gateway 실행)
+
+```bash
+# 수신용 LoRa ESP32를 Pi USB에 연결한 뒤
+cd ~/Edge-Online-ML-AoII
+source venv/bin/activate
+python gateway/gateway.py
+```
+
+- Pi에서는 `.env`에 `SERIAL_PORT=/dev/ttyUSB0` (또는 `ls /dev/ttyUSB*`로 확인한 포트) 설정. `MQTT_BROKER=localhost`면 됨.
+
 ### 맥북
 
 ```bash
 # 1) MySQL 실행, DB 생성 (aoii)
-# 2) .env 설정 후 gateway 실행 (ESP32 USB 연결)
-.venv/bin/python gateway/gateway.py
-
-# 3) 다른 터미널에서 DB 구독자
+# 2) 온습도(엣지)는 맥북 USB에만 연결 (전원·시리얼 로그용). gateway는 Pi에서 실행하므로 맥북에서는 gateway 실행 안 함.
+# 3) DB 구독자 실행 (Pi 브로커 구독 → 맥북 MySQL 저장)
 .venv/bin/python server/mqtt_to_mysql.py
 ```
 
-- **gateway**는 ESP32가 맥북 USB에 연결된 경우 맥북에서 실행. `.env`에 `MQTT_BROKER=라즈베리파이IP`, `SERIAL_PORT=/dev/cu.usbserial-3` 등 설정.
-- **mqtt_to_mysql**은 맥북에서 실행해 맥북 MySQL에 저장.
+- 맥북 `.env`에 `MQTT_BROKER=라즈베리파이IP` 필요. **mqtt_to_mysql**만 맥북에서 실행해 맥북 MySQL에 저장.
 
 ---
 

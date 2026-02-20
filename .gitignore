@@ -1,0 +1,16 @@
+# Prometheus TSDB (실행 시 프로젝트 루트에 생성됨 → 커밋 제외)
+data/
+
+# 설정·비밀 (팀원에게 내용만 공유)
+.env
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 기타
+.DS_Store
+*.log
