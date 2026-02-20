@@ -9,18 +9,17 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _project_root)
 os.chdir(_project_root)
 
-# .env / mysql_example.env 에서 MYSQL_* 로드
-for _env_file in (os.path.join(_project_root, ".env"), os.path.join(_project_root, "server", "mysql_example.env")):
-    if os.path.isfile(_env_file):
-        with open(_env_file, "r", encoding="utf-8") as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith("#") and "=" in _line:
-                    _k, _v = _line.split("=", 1)
-                    _k, _v = _k.strip(), _v.strip()
-                    if _k.startswith("MYSQL_") or _k.startswith("MQTT_"):
-                        os.environ[_k] = _v
-        break
+# .env 로드
+_env_path = os.path.join(_project_root, ".env")
+if os.path.isfile(_env_path):
+    with open(_env_path, "r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                _k, _v = _k.strip(), _v.strip()
+                if _k.startswith("MYSQL_") or _k.startswith("MQTT_"):
+                    os.environ[_k] = _v
 
 import paho.mqtt.client as mqtt
 from server.db import init_db, insert_reading

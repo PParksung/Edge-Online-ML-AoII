@@ -14,18 +14,17 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-# MySQL env 로드 (.env 또는 server/mysql_example.env)
-for _f in (os.path.join(ROOT, ".env"), os.path.join(ROOT, "server", "mysql_example.env")):
-    if os.path.isfile(_f):
-        with open(_f, "r", encoding="utf-8") as _file:
-            for _line in _file:
-                _line = _line.strip()
-                if _line and not _line.startswith("#") and "=" in _line:
-                    _k, _v = _line.split("=", 1)
-                    _k, _v = _k.strip(), _v.strip()
-                    if _k.startswith("MYSQL_"):
-                        os.environ[_k] = _v
-        break
+# .env 로드
+_env_path = os.path.join(ROOT, ".env")
+if os.path.isfile(_env_path):
+    with open(_env_path, "r", encoding="utf-8") as _file:
+        for _line in _file:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                _k, _v = _k.strip(), _v.strip()
+                if _k.startswith("MYSQL_"):
+                    os.environ[_k] = _v
 
 import serial
 from server.db import init_db, insert_edge_log
