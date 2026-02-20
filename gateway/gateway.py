@@ -152,7 +152,7 @@ try:
 
                     # (3) 모델 동기화 및 학습 (비교군 Offline TinyML 실험 시 아래 한 줄 주석 처리)
                     # 온라인 학습 (가중치 동기화)
-                    model.online_update(actual_t, actual_h, lr=0.05)
+                    model.online_update(actual_t, actual_h, lr=0.01)
                     
                     # 상태 강제 갱신 및 시간 응답 (ACK)
                     model.last_pred_t = actual_t
