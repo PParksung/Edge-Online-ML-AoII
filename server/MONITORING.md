@@ -40,12 +40,14 @@ python server/app.py
 brew install prometheus
 ```
 
-### 실행
+### 실행 (프로젝트 안에 data 폴더 안 쌓이게 하려면)
 
 ```bash
-prometheus --config.file=monitoring/prometheus.yml
+# 저장 경로를 프로젝트 밖으로 지정 (지정 안 하면 프로젝트 루트에 data/ 생성됨)
+prometheus --config.file=monitoring/prometheus.yml --storage.tsdb.path=/tmp/prometheus_aoii
 ```
 
+- macOS에서 재부팅 후에도 유지하려면: `--storage.tsdb.path=$HOME/prometheus_aoii_data` 등으로 지정.
 - UI: http://localhost:9090  
 - **Status → Targets**에서 `localhost:5001`이 UP인지 확인.  
 - 앱을 라즈베리파이에서 실행하면 `prometheus.yml`의 `targets`를 `["라즈베리파이_IP:5001"]`로 변경.

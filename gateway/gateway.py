@@ -49,14 +49,20 @@ model = GatewayMLP(W1, B1, W2, B2, X_MEAN, X_STD, Y_MEAN, Y_STD)
 
 # =========================================================
 # 2. MQTT 클라이언트 (수신 데이터는 MQTT로만 전달, DB/CSV는 구독자에서 처리)
+# QoS: 기본 0(주기/하트비트·배터리), 이벤트(임계값 초과·AoII) 시에만 1
 # =========================================================
-def _mqtt_publish(client, payload_dict):
+BETA_TEMP = 0.5   # 엣지와 동일: 온도 오차 임계값(°C)
+BETA_HUM = 3.0    # 엣지와 동일: 습도 오차 임계값(%)
+
+def _mqtt_publish(client, payload_dict, qos=0):
+    """qos=0: 주기/하트비트. qos=1: 임계값 초과(AoII) 시 브로커 보관·유실 완화."""
+    payload = json.dumps(payload_dict)
     try:
-        client.publish(MQTT_TOPIC_READINGS, json.dumps(payload_dict), qos=0)
-    except Exception as e:
+        client.publish(MQTT_TOPIC_READINGS, payload, qos=qos)
+    except Exception:
         try:
             client.reconnect()
-            client.publish(MQTT_TOPIC_READINGS, json.dumps(payload_dict), qos=0)
+            client.publish(MQTT_TOPIC_READINGS, payload, qos=qos)
         except Exception as e2:
             print(f"   MQTT publish error: {e2}")
 
@@ -95,7 +101,7 @@ try:
         # 1. 모델 예측 (현재 상태)
         pred = model.predict(model.last_pred_t, model.last_pred_h, time_n)
         
-        # 2. 60초마다 게이트웨이 자체 예측값(EST) MQTT 발행
+        # 2. 60초마다 게이트웨이 자체 예측값(EST) MQTT 발행 (주기 전송 → QoS 0)
         if time.time() - last_est_log_time >= 60:
             _mqtt_publish(mqtt_client, {
                 "event": "EST",
@@ -108,7 +114,7 @@ try:
                 "error_t": None,
                 "error_h": None,
                 "total_tx": total_tx_count,
-            })
+            }, qos=0)
             last_est_log_time = time.time()
 
         # 3. 데이터 수신 처리 (RX)
@@ -117,10 +123,20 @@ try:
             
             if "Received:" in line:
                 try:
+                    gateway_receive_ms = int(time.time() * 1000)  # 수신 즉시 시각 (epoch ms)
                     payload = line.split("Received: ")[1]
-                    parts = payload.split(",")
-                    actual_t = float(parts[0])
-                    actual_h = float(parts[1])
+                    parts = [p.strip() for p in payload.split(",")]
+
+                    # 페이로드 형식: 3필드 = edge_timestamp_ms,actual_t,actual_h / 2필드 = actual_t,actual_h (구 형식)
+                    if len(parts) >= 3:
+                        edge_timestamp_ms = int(parts[0])
+                        actual_t = float(parts[1])
+                        actual_h = float(parts[2])
+                        transmission_delay_ms = gateway_receive_ms - edge_timestamp_ms
+                    else:
+                        actual_t = float(parts[0])
+                        actual_h = float(parts[1])
+                        transmission_delay_ms = None
 
                     # (1) Ping (0.0, 0.0) 필터링
                     if actual_t == 0.0 and actual_h == 0.0:
@@ -135,9 +151,12 @@ try:
 
                     print(f"\n[{now_lv.strftime('%H:%M:%S')}] Data RX! (TX Count: {total_tx_count})")
                     print(f"   Actual: {actual_t:.2f}C / {actual_h:.2f}% | Pred: {pred[0]:.2f}C / {pred[1]:.2f}%")
+                    if transmission_delay_ms is not None:
+                        print(f"   Transmission delay: {transmission_delay_ms} ms")
 
-                    # MQTT로 한 번만 발행 (DB/CSV는 구독자 mqtt_to_mysql, mqtt_to_csv에서 처리)
-                    _mqtt_publish(mqtt_client, {
+                    # MQTT 발행: 임계값 초과(AoII) 시에만 QoS 1, 그 외(하트비트 등) QoS 0
+                    is_aoii = (err_t >= BETA_TEMP or err_h >= BETA_HUM)
+                    payload_out = {
                         "event": "RX",
                         "timestamp": now_lv.strftime("%Y-%m-%d %H:%M:%S"),
                         "time_n": round(time_n, 4),
@@ -148,7 +167,11 @@ try:
                         "error_t": round(err_t, 2),
                         "error_h": round(err_h, 2),
                         "total_tx": total_tx_count,
-                    })
+                    }
+                    if transmission_delay_ms is not None:
+                        payload_out["transmission_delay_ms"] = transmission_delay_ms
+
+                    _mqtt_publish(mqtt_client, payload_out, qos=1 if is_aoii else 0)
 
                     # (3) 모델 동기화 및 학습 (비교군 Offline TinyML 실험 시 아래 한 줄 주석 처리)
                     # 온라인 학습 (가중치 동기화)

@@ -29,8 +29,8 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_TOPIC = "aoii/readings"
 CSV_FILENAME = "experiment_log_online.csv"
 
-# CSV 헤더 (기존 gateway와 동일)
-HEADER = ["Timestamp", "Time_n", "Event", "Actual_T", "Actual_H", "Pred_T", "Pred_H", "Error_T", "Error_H", "Total_TX"]
+# CSV 헤더 (transmission_delay_ms: 엣지→게이트웨이 전송 지연 ms)
+HEADER = ["Timestamp", "Time_n", "Event", "Actual_T", "Actual_H", "Pred_T", "Pred_H", "Error_T", "Error_H", "Total_TX", "Transmission_Delay_Ms"]
 
 
 def ensure_csv():
@@ -55,6 +55,7 @@ def row_from_payload(data):
         v("error_t"),
         v("error_h"),
         data.get("total_tx", ""),
+        data.get("transmission_delay_ms", ""),
     ]
 
 
