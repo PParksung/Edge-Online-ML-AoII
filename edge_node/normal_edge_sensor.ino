@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Adafruit_AHTX0.h>
 #include "SSD1306Wire.h"
+#include <Esp.h>
 
 #define OLED_SDA 4
 #define OLED_SCL 15
@@ -28,22 +29,33 @@ void setup() {
 }
 
 void loop() {
+  // 연산 시간 측정: 센서 읽기
+  unsigned long t_start = micros();
+
   sensors_event_t h_event, t_event;
   aht.getEvent(&h_event, &t_event);
-  
+
   float cur_t = t_event.temperature;
   float cur_h = h_event.relative_humidity;
 
-  // 1. 파이썬 스크립트가 파싱하기 좋게 "온도,습도" 포맷으로 시리얼 출력
-  Serial.println(String(cur_t, 2) + "," + String(cur_h, 2));
+  unsigned long t_end = micros();
+  unsigned long inference_time_us = t_end - t_start;
 
-  // 2. OLED 화면 표시
+  uint32_t free_heap = ESP.getFreeHeap();
+  uint32_t total_heap = ESP.getHeapSize();
+
+  // CSV 한 줄: actual_t, actual_h, pred_t, pred_h, error_t, error_h, status, inference_time_us, free_heap, total_heap
+  // (RAW 모드: pred/error 없음 → 0, status=RAW)
+  Serial.println(
+    String(cur_t, 2) + "," + String(cur_h, 2) + ",0,0,0,0,RAW," +
+    String(inference_time_us) + "," + String(free_heap) + "," + String(total_heap)
+  );
+
   display.clear();
   display.drawString(0, 0, "Logging Raw Data...");
   display.drawString(0, 20, "T: " + String(cur_t, 2) + " C");
   display.drawString(0, 40, "H: " + String(cur_h, 2) + " %");
   display.display();
 
-  // 3. 정확히 1분 대기 (수집용이므로 Sleep 안 하고 delay 써도 무방)
-  delay(60000); 
+  delay(60000);
 }
