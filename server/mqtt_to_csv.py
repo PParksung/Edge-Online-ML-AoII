@@ -70,10 +70,13 @@ def on_connect(client, userdata, flags, rc):
 def on_message(client, userdata, msg):
     try:
         data = json.loads(msg.payload.decode("utf-8"))
+        event = data.get("event", "")
+        if event != "RX":
+            return
         ensure_csv()
         with open(CSV_FILENAME, mode="a", newline="") as f:
             csv.writer(f).writerow(row_from_payload(data))
-        print(f"mqtt_to_csv: appended 1 row (event={data.get('event')})")
+        print(f"mqtt_to_csv: appended 1 row (event={event})")
     except Exception as e:
         print(f"mqtt_to_csv: on_message error: {e}")
 

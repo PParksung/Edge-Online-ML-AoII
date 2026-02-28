@@ -9,6 +9,10 @@
 // ==========================================
 // 하드웨어 설정 (Heltec V2 / Las Vegas)
 // ==========================================
+
+#define OLED_SDA 4
+#define OLED_SCL 15
+#define OLED_RST 16
 #define SCK     5
 #define MISO    19
 #define MOSI    27
@@ -16,10 +20,6 @@
 #define RST     14
 #define DI0     26
 #define BAND    433E6
-
-#define OLED_SDA 4
-#define OLED_SCL 15
-#define OLED_RST 16
 
 SSD1306Wire display(0x3c, OLED_SDA, OLED_SCL);
 Adafruit_AHTX0 aht;
@@ -198,8 +198,8 @@ float B3[2] = {0.250468f, -0.361807f};
 // ==========================================
 
 float lr = 0.01f;
-float beta_temp = 0.5f;
-float beta_hum  = 3.0f;
+float beta_temp = 0.7f;
+float beta_hum  = 4.0f;
 const float epsilon = 0.001f;
 
 float hidden1[N_H1];
@@ -313,6 +313,24 @@ float get_time_n() {
   return (float)local_sec / 86400.0f;
 }
 
+String serial_line_buf = "";
+
+void checkSerialTimeSync() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      serial_line_buf.trim();
+      if (serial_line_buf.startsWith("TIME:")) {
+        last_sync_unix = serial_line_buf.substring(5).toInt();
+        sync_millis = millis();
+      }
+      serial_line_buf = "";
+    } else if (c != '\r') {
+      serial_line_buf += c;
+    }
+  }
+}
+
 void waitForTimeSync() {
   display.clear();
   display.drawString(0, 0, "Syncing Time...");
@@ -320,28 +338,16 @@ void waitForTimeSync() {
 
   int retries = 0;
   while (last_sync_unix == 0) {
-    LoRa.beginPacket();
-    LoRa.print("0.0,0.0");
-    LoRa.endPacket();
+    Serial.println("TIME?");
 
     long start = millis();
-    bool received = false;
     while (millis() - start < 3000) {
-      int p_size = LoRa.parsePacket();
-      if (p_size) {
-        String income = "";
-        while (LoRa.available()) income += (char)LoRa.read();
-
-        if (income.length() > 8) {
-          last_sync_unix = income.toInt();
-          sync_millis = millis();
-          received = true;
-          break;
-        }
-      }
+      checkSerialTimeSync();
+      if (last_sync_unix != 0) break;
+      delay(10);
     }
 
-    if (received) {
+    if (last_sync_unix != 0) {
       display.drawString(0, 20, "Success!");
       display.drawString(0, 40, "TS: " + String(last_sync_unix));
       display.display();
